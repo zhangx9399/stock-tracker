@@ -9,40 +9,48 @@ const SECRET = new TextEncoder().encode(
   process.env.JWT_SECRET || 'stock-tracker-mvp-secret-key-2024'
 );
 
-// ===== SQLite 数据库（支持环境变量覆盖路径，兼容 Railway 持久卷） =====
+// ===== SQLite 数据库（懒加载，避免 next build 时初始化导致锁定） =====
 
-const defaultDbPath = path.join(os.homedir(), '.qoderworkcn', 'data', 'stock-tracker', 'stock-tracker.db');
-const dbPath = process.env.DATABASE_PATH || defaultDbPath;
-const dataDir = path.dirname(dbPath);
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
+let _db: InstanceType<typeof Database> | null = null;
+
+function getDb() {
+  if (_db) return _db;
+
+  const defaultDbPath = path.join(os.homedir(), '.qoderworkcn', 'data', 'stock-tracker', 'stock-tracker.db');
+  const dbPath = process.env.DATABASE_PATH || defaultDbPath;
+  const dataDir = path.dirname(dbPath);
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  _db = new Database(dbPath);
+  _db.pragma('journal_mode = WAL');
+
+  _db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      nickname TEXT NOT NULL DEFAULT '',
+      theme TEXT NOT NULL DEFAULT 'default',
+      motto TEXT NOT NULL DEFAULT '珍惜市场给你的特别提款凭证的机会',
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS stocks (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      code TEXT NOT NULL,
+      name TEXT NOT NULL,
+      buy_price REAL NOT NULL,
+      shares INTEGER NOT NULL,
+      buy_date TEXT NOT NULL,
+      current_price REAL NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `);
+
+  return _db;
 }
-
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password TEXT NOT NULL,
-    nickname TEXT NOT NULL DEFAULT '',
-    theme TEXT NOT NULL DEFAULT 'default',
-    motto TEXT NOT NULL DEFAULT '珍惜市场给你的特别提款凭证的机会',
-    created_at TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS stocks (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    code TEXT NOT NULL,
-    name TEXT NOT NULL,
-    buy_price REAL NOT NULL,
-    shares INTEGER NOT NULL,
-    buy_date TEXT NOT NULL,
-    current_price REAL NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id)
-  );
-`);
 
 // ===== 类型定义 =====
 
@@ -70,7 +78,7 @@ export interface Stock {
 // ===== 用户相关 =====
 
 export async function createUser(email: string, password: string, nickname: string): Promise<User> {
-  const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+  const existing = getDb().prepare('SELECT id FROM users WHERE email = ?').get(email);
   if (existing) throw new Error('该邮箱已被注册');
 
   const hashed = await bcrypt.hash(password, 10);
@@ -84,7 +92,7 @@ export async function createUser(email: string, password: string, nickname: stri
     createdAt: new Date().toISOString(),
   };
 
-  db.prepare(`
+  getDb().prepare(`
     INSERT INTO users (id, email, password, nickname, theme, motto, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(user.id, user.email, user.password, user.nickname, user.theme, user.motto, user.createdAt);
@@ -93,7 +101,7 @@ export async function createUser(email: string, password: string, nickname: stri
 }
 
 export async function verifyUser(email: string, password: string): Promise<User | null> {
-  const row = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as Record<string, unknown> | undefined;
+  const row = getDb().prepare('SELECT * FROM users WHERE email = ?').get(email) as Record<string, unknown> | undefined;
   if (!row) return null;
 
   const valid = await bcrypt.compare(password, row.password as string);
@@ -111,7 +119,7 @@ export async function verifyUser(email: string, password: string): Promise<User 
 }
 
 export function getUserById(id: string): User | undefined {
-  const row = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
+  const row = getDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!row) return undefined;
 
   return {
@@ -126,17 +134,17 @@ export function getUserById(id: string): User | undefined {
 }
 
 export function updateUserTheme(userId: string, theme: string) {
-  db.prepare('UPDATE users SET theme = ? WHERE id = ?').run(theme, userId);
+  getDb().prepare('UPDATE users SET theme = ? WHERE id = ?').run(theme, userId);
 }
 
 export function updateUserMotto(userId: string, motto: string) {
-  db.prepare('UPDATE users SET motto = ? WHERE id = ?').run(motto, userId);
+  getDb().prepare('UPDATE users SET motto = ? WHERE id = ?').run(motto, userId);
 }
 
 // ===== 股票相关 =====
 
 export function getStocksByUser(userId: string): Stock[] {
-  const rows = db.prepare('SELECT * FROM stocks WHERE user_id = ?').all(userId) as Record<string, unknown>[];
+  const rows = getDb().prepare('SELECT * FROM stocks WHERE user_id = ?').all(userId) as Record<string, unknown>[];
   return rows.map(row => ({
     id: row.id as string,
     userId: row.user_id as string,
@@ -151,7 +159,7 @@ export function getStocksByUser(userId: string): Stock[] {
 
 export function addStock(stock: Omit<Stock, 'id'>): Stock {
   const newStock: Stock = { ...stock, id: crypto.randomUUID() };
-  db.prepare(`
+  getDb().prepare(`
     INSERT INTO stocks (id, user_id, code, name, buy_price, shares, buy_date, current_price)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(newStock.id, newStock.userId, newStock.code, newStock.name, newStock.buyPrice, newStock.shares, newStock.buyDate, newStock.currentPrice);
@@ -159,11 +167,11 @@ export function addStock(stock: Omit<Stock, 'id'>): Stock {
 }
 
 export function deleteStock(stockId: string, userId: string) {
-  db.prepare('DELETE FROM stocks WHERE id = ? AND user_id = ?').run(stockId, userId);
+  getDb().prepare('DELETE FROM stocks WHERE id = ? AND user_id = ?').run(stockId, userId);
 }
 
 export function updateStockPrice(stockId: string, price: number) {
-  db.prepare('UPDATE stocks SET current_price = ? WHERE id = ?').run(price, stockId);
+  getDb().prepare('UPDATE stocks SET current_price = ? WHERE id = ?').run(price, stockId);
 }
 
 // ===== JWT =====
