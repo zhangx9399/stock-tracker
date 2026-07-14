@@ -34,7 +34,16 @@ function getDb() {
       nickname TEXT NOT NULL DEFAULT '',
       theme TEXT NOT NULL DEFAULT 'default',
       motto TEXT NOT NULL DEFAULT '珍惜市场给你的特别提款凭证的机会',
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      font_days_size REAL NOT NULL DEFAULT 7.0,
+      font_days_color TEXT NOT NULL DEFAULT '',
+      font_motto_size REAL NOT NULL DEFAULT 1.15,
+      font_motto_color TEXT NOT NULL DEFAULT '',
+      font_price_size REAL NOT NULL DEFAULT 2.25,
+      font_price_color TEXT NOT NULL DEFAULT '',
+      custom_theme_h REAL,
+      custom_theme_s REAL,
+      custom_theme_l REAL
     );
     CREATE TABLE IF NOT EXISTS stocks (
       id TEXT PRIMARY KEY,
@@ -47,7 +56,34 @@ function getDb() {
       current_price REAL NOT NULL,
       FOREIGN KEY (user_id) REFERENCES users(id)
     );
+    CREATE TABLE IF NOT EXISTS motto_history (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      motto TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
   `);
+
+  // 为已有数据库添加新字段（迁移）
+  const columns = _db.prepare("PRAGMA table_info(users)").all() as Record<string, unknown>[];
+  const colNames = columns.map(c => c.name as string);
+  const migrations: [string, string][] = [
+    ['font_days_size', 'ALTER TABLE users ADD COLUMN font_days_size REAL NOT NULL DEFAULT 7.0'],
+    ['font_days_color', 'ALTER TABLE users ADD COLUMN font_days_color TEXT NOT NULL DEFAULT \'\''],
+    ['font_motto_size', 'ALTER TABLE users ADD COLUMN font_motto_size REAL NOT NULL DEFAULT 1.15'],
+    ['font_motto_color', 'ALTER TABLE users ADD COLUMN font_motto_color TEXT NOT NULL DEFAULT \'\''],
+    ['font_price_size', 'ALTER TABLE users ADD COLUMN font_price_size REAL NOT NULL DEFAULT 2.25'],
+    ['font_price_color', 'ALTER TABLE users ADD COLUMN font_price_color TEXT NOT NULL DEFAULT \'\''],
+    ['custom_theme_h', 'ALTER TABLE users ADD COLUMN custom_theme_h REAL'],
+    ['custom_theme_s', 'ALTER TABLE users ADD COLUMN custom_theme_s REAL'],
+    ['custom_theme_l', 'ALTER TABLE users ADD COLUMN custom_theme_l REAL'],
+  ];
+  for (const [col, sql] of migrations) {
+    if (!colNames.includes(col)) {
+      _db.exec(sql);
+    }
+  }
 
   return _db;
 }
@@ -60,6 +96,22 @@ export interface User {
   password: string;
   nickname: string;
   theme: string;
+  motto: string;
+  createdAt: string;
+  fontDaysSize: number;
+  fontDaysColor: string;
+  fontMottoSize: number;
+  fontMottoColor: string;
+  fontPriceSize: number;
+  fontPriceColor: string;
+  customThemeH: number | null;
+  customThemeS: number | null;
+  customThemeL: number | null;
+}
+
+export interface MottoHistory {
+  id: string;
+  userId: string;
   motto: string;
   createdAt: string;
 }
@@ -90,12 +142,25 @@ export async function createUser(email: string, password: string, nickname: stri
     theme: 'default',
     motto: '珍惜市场给你的特别提款凭证的机会',
     createdAt: new Date().toISOString(),
+    fontDaysSize: 7.0,
+    fontDaysColor: '',
+    fontMottoSize: 1.15,
+    fontMottoColor: '',
+    fontPriceSize: 2.25,
+    fontPriceColor: '',
+    customThemeH: null,
+    customThemeS: null,
+    customThemeL: null,
   };
 
   getDb().prepare(`
-    INSERT INTO users (id, email, password, nickname, theme, motto, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(user.id, user.email, user.password, user.nickname, user.theme, user.motto, user.createdAt);
+    INSERT INTO users (id, email, password, nickname, theme, motto, created_at,
+      font_days_size, font_days_color, font_motto_size, font_motto_color,
+      font_price_size, font_price_color, custom_theme_h, custom_theme_s, custom_theme_l)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(user.id, user.email, user.password, user.nickname, user.theme, user.motto, user.createdAt,
+    user.fontDaysSize, user.fontDaysColor, user.fontMottoSize, user.fontMottoColor,
+    user.fontPriceSize, user.fontPriceColor, user.customThemeH, user.customThemeS, user.customThemeL);
 
   return user;
 }
@@ -107,21 +172,17 @@ export async function verifyUser(email: string, password: string): Promise<User 
   const valid = await bcrypt.compare(password, row.password as string);
   if (!valid) return null;
 
-  return {
-    id: row.id as string,
-    email: row.email as string,
-    password: row.password as string,
-    nickname: row.nickname as string,
-    theme: row.theme as string,
-    motto: row.motto as string,
-    createdAt: row.created_at as string,
-  };
+  return rowToUser(row);
 }
 
 export function getUserById(id: string): User | undefined {
   const row = getDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as Record<string, unknown> | undefined;
   if (!row) return undefined;
 
+  return rowToUser(row);
+}
+
+function rowToUser(row: Record<string, unknown>): User {
   return {
     id: row.id as string,
     email: row.email as string,
@@ -130,6 +191,15 @@ export function getUserById(id: string): User | undefined {
     theme: row.theme as string,
     motto: row.motto as string,
     createdAt: row.created_at as string,
+    fontDaysSize: (row.font_days_size as number) ?? 7.0,
+    fontDaysColor: (row.font_days_color as string) ?? '',
+    fontMottoSize: (row.font_motto_size as number) ?? 1.15,
+    fontMottoColor: (row.font_motto_color as string) ?? '',
+    fontPriceSize: (row.font_price_size as number) ?? 2.25,
+    fontPriceColor: (row.font_price_color as string) ?? '',
+    customThemeH: row.custom_theme_h as number | null,
+    customThemeS: row.custom_theme_s as number | null,
+    customThemeL: row.custom_theme_l as number | null,
   };
 }
 
@@ -139,6 +209,62 @@ export function updateUserTheme(userId: string, theme: string) {
 
 export function updateUserMotto(userId: string, motto: string) {
   getDb().prepare('UPDATE users SET motto = ? WHERE id = ?').run(motto, userId);
+}
+
+export function updateUserFontSettings(userId: string, settings: {
+  fontDaysSize?: number;
+  fontDaysColor?: string;
+  fontMottoSize?: number;
+  fontMottoColor?: string;
+  fontPriceSize?: number;
+  fontPriceColor?: string;
+}) {
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (settings.fontDaysSize !== undefined) { fields.push('font_days_size = ?'); values.push(settings.fontDaysSize); }
+  if (settings.fontDaysColor !== undefined) { fields.push('font_days_color = ?'); values.push(settings.fontDaysColor); }
+  if (settings.fontMottoSize !== undefined) { fields.push('font_motto_size = ?'); values.push(settings.fontMottoSize); }
+  if (settings.fontMottoColor !== undefined) { fields.push('font_motto_color = ?'); values.push(settings.fontMottoColor); }
+  if (settings.fontPriceSize !== undefined) { fields.push('font_price_size = ?'); values.push(settings.fontPriceSize); }
+  if (settings.fontPriceColor !== undefined) { fields.push('font_price_color = ?'); values.push(settings.fontPriceColor); }
+  if (fields.length === 0) return;
+  values.push(userId);
+  getDb().prepare(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+}
+
+export function updateUserCustomTheme(userId: string, h: number, s: number, l: number) {
+  getDb().prepare('UPDATE users SET custom_theme_h = ?, custom_theme_s = ?, custom_theme_l = ? WHERE id = ?')
+    .run(h, s, l, userId);
+}
+
+// ===== 标语历史 =====
+
+export function addMottoHistory(userId: string, motto: string): MottoHistory {
+  const entry: MottoHistory = {
+    id: crypto.randomUUID(),
+    userId,
+    motto,
+    createdAt: new Date().toISOString(),
+  };
+  getDb().prepare('INSERT INTO motto_history (id, user_id, motto, created_at) VALUES (?, ?, ?, ?)')
+    .run(entry.id, entry.userId, entry.motto, entry.createdAt);
+  return entry;
+}
+
+export function getMottoHistory(userId: string): MottoHistory[] {
+  const rows = getDb().prepare(
+    'SELECT * FROM motto_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 50'
+  ).all(userId) as Record<string, unknown>[];
+  return rows.map(row => ({
+    id: row.id as string,
+    userId: row.user_id as string,
+    motto: row.motto as string,
+    createdAt: row.created_at as string,
+  }));
+}
+
+export function deleteMottoHistory(id: string, userId: string) {
+  getDb().prepare('DELETE FROM motto_history WHERE id = ? AND user_id = ?').run(id, userId);
 }
 
 // ===== 股票相关 =====
@@ -179,7 +305,7 @@ export function updateStockPrice(stockId: string, price: number) {
 export async function createToken(userId: string): Promise<string> {
   return new SignJWT({ userId })
     .setProtectedHeader({ alg: 'HS256' })
-    .setExpirationTime('7d')
+    .setExpirationTime('30d')
     .sign(SECRET);
 }
 

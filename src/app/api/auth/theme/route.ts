@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken, updateUserTheme } from '@/lib/store';
+import { verifyToken, updateUserTheme, updateUserCustomTheme } from '@/lib/store';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,10 +9,17 @@ export async function POST(req: NextRequest) {
     const userId = await verifyToken(token);
     if (!userId) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const { theme } = await req.json();
-    if (!theme) return NextResponse.json({ error: '缺少主题参数' }, { status: 400 });
+    const { theme, h, s, l } = await req.json();
 
-    updateUserTheme(userId, theme);
+    if (theme === 'custom' && typeof h === 'number' && typeof s === 'number' && typeof l === 'number') {
+      updateUserTheme(userId, 'custom');
+      updateUserCustomTheme(userId, h, s, l);
+    } else if (theme) {
+      updateUserTheme(userId, theme);
+    } else {
+      return NextResponse.json({ error: '缺少主题参数' }, { status: 400 });
+    }
+
     return NextResponse.json({ success: true });
   } catch {
     return NextResponse.json({ error: '保存失败' }, { status: 500 });

@@ -28,6 +28,15 @@ interface User {
   nickname: string;
   theme: string;
   motto: string;
+  fontDaysSize: number;
+  fontDaysColor: string;
+  fontMottoSize: number;
+  fontMottoColor: string;
+  fontPriceSize: number;
+  fontPriceColor: string;
+  customThemeH: number | null;
+  customThemeS: number | null;
+  customThemeL: number | null;
 }
 
 const DEFAULT_MOTTO = '珍惜市场给你的特别提款凭证的机会';
@@ -41,8 +50,13 @@ export default function DashboardPage() {
   const [showList, setShowList] = useState(false);
 
   useEffect(() => {
-    if (user?.theme) applyTheme(user.theme);
-  }, [user?.theme]);
+    if (user?.theme) {
+      const customHsl = user.theme === 'custom' && user.customThemeH !== null
+        ? { h: user.customThemeH, s: user.customThemeS!, l: user.customThemeL! }
+        : undefined;
+      applyTheme(user.theme, customHsl);
+    }
+  }, [user?.theme, user?.customThemeH, user?.customThemeS, user?.customThemeL]);
 
   const fetchStocks = useCallback(async () => {
     try {
@@ -61,7 +75,10 @@ export default function DashboardPage() {
           return;
         }
         setUser(data.user);
-        applyTheme(data.user.theme || 'default');
+        const customHsl = data.user.theme === 'custom' && data.user.customThemeH !== null
+          ? { h: data.user.customThemeH, s: data.user.customThemeS, l: data.user.customThemeL }
+          : undefined;
+        applyTheme(data.user.theme || 'default', customHsl);
       })
       .catch(() => router.replace('/login'));
   }, [router]);
@@ -165,22 +182,31 @@ export default function DashboardPage() {
             {/* 第一核心区域：天数 + 标语 */}
             <div style={{ textAlign: 'center', padding: '2rem 0 1rem' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center' }}>
-                <span className="days-number">{primary.days}</span>
-                <span className="days-unit">天</span>
+                <span className="days-number" style={{
+                  fontSize: `${user?.fontDaysSize || 7}rem`,
+                  color: user?.fontDaysColor || undefined,
+                }}>{primary.days}</span>
+                <span className="days-unit" style={{
+                  fontSize: `${(user?.fontDaysSize || 7) * 0.4}rem`,
+                  color: user?.fontDaysColor || undefined,
+                }}>天</span>
               </div>
 
               <LiveTimer buyDate={primary.buyDate} />
 
-              <p className="days-motto">{motto}</p>
+              <p className="days-motto" style={{
+                fontSize: `${user?.fontMottoSize || 1.15}rem`,
+                color: user?.fontMottoColor || undefined,
+              }}>{motto}</p>
             </div>
 
             {/* 亏损比例 + 股票名称 */}
             <div style={{ textAlign: 'center', marginTop: '2rem' }}>
               <span style={{
-                fontSize: 'clamp(1.5rem, 4vw, 2.25rem)',
+                fontSize: `${user?.fontPriceSize || 2.25}rem`,
                 fontWeight: 200,
                 fontFamily: "'Inter', sans-serif",
-                color: primary.lossRatio > 0 ? 'var(--loss-color)' : 'var(--gain-color)',
+                color: user?.fontPriceColor || (primary.lossRatio > 0 ? 'var(--loss-color)' : 'var(--gain-color)'),
                 fontVariantNumeric: 'tabular-nums',
                 letterSpacing: '-0.02em',
               }}>

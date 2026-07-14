@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyToken, updateUserMotto, addMottoHistory } from '@/lib/store';
+import { verifyToken, updateUserCustomTheme } from '@/lib/store';
 
 export async function POST(req: NextRequest) {
   try {
@@ -9,16 +9,13 @@ export async function POST(req: NextRequest) {
     const userId = await verifyToken(token);
     if (!userId) return NextResponse.json({ error: '未登录' }, { status: 401 });
 
-    const { motto } = await req.json();
-    if (typeof motto !== 'string') {
-      return NextResponse.json({ error: '标语格式错误' }, { status: 400 });
+    const { h, s, l } = await req.json();
+    if (typeof h !== 'number' || typeof s !== 'number' || typeof l !== 'number') {
+      return NextResponse.json({ error: '参数错误' }, { status: 400 });
     }
 
-    const trimmed = motto.trim();
-    updateUserMotto(userId, trimmed);
-    // 保存到历史记录
-    addMottoHistory(userId, trimmed);
-    return NextResponse.json({ success: true });
+    updateUserCustomTheme(userId, h, s, l);
+    return NextResponse.json({ success: true, h, s, l });
   } catch {
     return NextResponse.json({ error: '保存失败' }, { status: 500 });
   }
